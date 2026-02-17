@@ -95,28 +95,25 @@ class ClaudeWatch(rumps.App):
 
         return False
 
-    def is_waiting_for_input(self, jsonl_str):
-        """Check if a session is idle and waiting for user input.
+    def get_session_state(self, jsonl_str):
+        """Determine the current state of a session by parsing JSONL content.
 
-        A session is waiting when the JSONL hasn't been modified for 3+ seconds
-        and the last entry is from the assistant — meaning Claude finished writing
-        and is waiting for the user. This covers:
-        - Text responses (waiting for next prompt)
-        - Tool use proposals (waiting for user approval)
+        Returns one of:
+        - 'waiting_tool': Last assistant block is tool_use — waiting for approval
+        - 'waiting_input': Last assistant block is text — waiting for next prompt
+        - 'active': Claude is working (thinking, executing tools, processing results)
+        - 'unknown': Can't determine state
         """
         try:
             if not jsonl_str:
-                return False
+                return 'unknown'
             jsonl_path = Path(jsonl_str)
             if not jsonl_path.exists():
-                return False
-            age = time.time() - jsonl_path.stat().st_mtime
-            if age < 3:
-                return False
+                return 'unknown'
 
             with open(jsonl_path, 'rb') as f:
                 f.seek(0, 2)
-                f.seek(max(0, f.tell() - 5000))
+                f.seek(max(0, f.tell() - 10000))
                 tail = f.read().decode('utf-8', errors='replace')
 
             for line in reversed(tail.splitlines()):
@@ -127,14 +124,38 @@ class ClaudeWatch(rumps.App):
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+
+                entry_type = obj.get('type')
+
+                # progress entries mean a tool is actively executing
+                if entry_type == 'progress':
+                    return 'active'
+
                 msg = obj.get('message', {})
                 role = msg.get('role')
-                if not role:
-                    continue
-                return role == 'assistant'
+                content = msg.get('content', [])
+
+                if role == 'user':
+                    # tool_result or new user message — Claude is processing
+                    return 'active'
+
+                if role == 'assistant':
+                    # Each JSONL entry has one content block — check its type
+                    if isinstance(content, list) and content:
+                        block = content[0]
+                        if isinstance(block, dict):
+                            block_type = block.get('type')
+                            if block_type == 'tool_use':
+                                return 'waiting_tool'
+                            if block_type == 'text':
+                                return 'waiting_input'
+                            if block_type == 'thinking':
+                                return 'active'
+                    return 'unknown'
+
         except Exception:
             pass
-        return False
+        return 'unknown'
 
     def scan_processes(self):
         """Scan for running claude-code processes"""
@@ -169,7 +190,7 @@ class ClaudeWatch(rumps.App):
                             'jsonl': str(jsonl_path) if jsonl_path else '',
                             'tty': tty,
                             'notified': False,
-                            'input_notified': False
+                            'last_state': 'active'
                         }
                         self.save_sessions()
                         self.update_menu()
@@ -177,23 +198,23 @@ class ClaudeWatch(rumps.App):
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
-        # Check for sessions waiting for input
+        # Check session states and notify on transitions
         for pid, session in list(self.sessions.items()):
             if session['status'] != 'running' or pid not in active_pids:
                 continue
             jsonl_str = session.get('jsonl', '')
-            waiting = self.is_waiting_for_input(jsonl_str)
-            if waiting and not session.get('input_notified', False):
-                session['input_notified'] = True
-                self.notify(
-                    f"Waiting for input in {session['ide']}",
-                    session.get('title', 'Unknown')[:100],
-                    pid
-                )
-                self.save_sessions()
-            elif not waiting and session.get('input_notified', False):
-                # User resumed — reset so we can notify again next time
-                session['input_notified'] = False
+            state = self.get_session_state(jsonl_str)
+            prev_state = session.get('last_state', 'active')
+
+            if state != prev_state and state in ('waiting_tool', 'waiting_input'):
+                title = session.get('title', 'Unknown')[:100]
+                if state == 'waiting_tool':
+                    self.notify(f"Needs approval in {session['ide']}", title, pid)
+                else:
+                    self.notify(f"Waiting for input in {session['ide']}", title, pid)
+
+            if state != 'unknown':
+                session['last_state'] = state
                 self.save_sessions()
 
         # Check for completed sessions
