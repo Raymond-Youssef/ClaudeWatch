@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🤖 ClaudeBoard - Installation"
+echo "🤖 ClaudeWatch - Installation"
 echo "=============================="
 echo ""
 
@@ -20,14 +20,14 @@ echo "📦 Installing dependencies..."
 pip3 install -r requirements.txt
 
 # Make tracker executable
-chmod +x claude-tracker.py
+chmod +x claudewatch.py
 
 # Create launch agent for auto-start (optional)
-read -p "Do you want ClaudeBoard to start automatically on login? (y/n) " -n 1 -r
+read -p "Do you want ClaudeWatch to start automatically on login? (y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    PLIST_PATH=~/Library/LaunchAgents/com.claudeboard.plist
-    SCRIPT_PATH="$(pwd)/claude-tracker.py"
+    PLIST_PATH=~/Library/LaunchAgents/com.claudewatch.plist
+    SCRIPT_PATH="$(pwd)/claudewatch.py"
 
     cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -35,7 +35,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.claudeboard</string>
+    <string>com.claudewatch</string>
     <key>ProgramArguments</key>
     <array>
         <string>$SCRIPT_PATH</string>
@@ -55,7 +55,7 @@ fi
 echo ""
 echo "✅ Installation complete!"
 echo ""
-echo "To start ClaudeBoard:"
-echo "  ./claude-tracker.py"
+echo "To start ClaudeWatch:"
+echo "  ./claudewatch.py"
 echo ""
 echo "Look for the 🤖 icon in your menu bar!"

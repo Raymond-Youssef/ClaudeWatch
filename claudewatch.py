@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ClaudeBoard - macOS Menu Bar App
+ClaudeWatch - macOS Menu Bar App
 Tracks all running Claude Code sessions across different IDEs and terminals.
 """
 
@@ -15,14 +15,15 @@ import subprocess
 import threading
 import time
 
-APP_NAME = 'ClaudeBoard'
+APP_NAME = 'ClaudeWatch'
 
-class ClaudeBoard(rumps.App):
+class ClaudeWatch(rumps.App):
     def __init__(self):
-        super(ClaudeBoard, self).__init__("🤖", quit_button=None)
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.png')
+        super(ClaudeWatch, self).__init__("ClaudeWatch", icon=icon_path, quit_button=None)
 
         # Setup data directory
-        self.data_dir = Path.home() / '.claudeboard'
+        self.data_dir = Path.home() / '.claudewatch'
         self.data_dir.mkdir(exist_ok=True)
         self.sessions_file = self.data_dir / 'sessions.json'
 
@@ -95,7 +96,14 @@ class ClaudeBoard(rumps.App):
         return False
 
     def is_waiting_for_input(self, jsonl_str):
-        """Check if a session is idle and waiting for user input"""
+        """Check if a session is idle and waiting for user input.
+
+        A session is waiting when the JSONL hasn't been modified for 3+ seconds
+        and the last entry is from the assistant — meaning Claude finished writing
+        and is waiting for the user. This covers:
+        - Text responses (waiting for next prompt)
+        - Tool use proposals (waiting for user approval)
+        """
         try:
             if not jsonl_str:
                 return False
@@ -103,11 +111,30 @@ class ClaudeBoard(rumps.App):
             if not jsonl_path.exists():
                 return False
             age = time.time() - jsonl_path.stat().st_mtime
-            if age < 10:
+            if age < 3:
                 return False
-            return True
+
+            with open(jsonl_path, 'rb') as f:
+                f.seek(0, 2)
+                f.seek(max(0, f.tell() - 5000))
+                tail = f.read().decode('utf-8', errors='replace')
+
+            for line in reversed(tail.splitlines()):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                msg = obj.get('message', {})
+                role = msg.get('role')
+                if not role:
+                    continue
+                return role == 'assistant'
         except Exception:
-            return False
+            pass
+        return False
 
     def scan_processes(self):
         """Scan for running claude-code processes"""
@@ -335,9 +362,9 @@ class ClaudeBoard(rumps.App):
         active = [s for s in self.sessions.values() if s['status'] == 'running']
 
         if active:
-            self.title = f"🤖 {len(active)}"
+            self.title = f" {len(active)}"
         else:
-            self.title = "🤖"
+            self.title = ""
 
         items_to_add = []
         if active:
@@ -500,4 +527,4 @@ class ClaudeBoard(rumps.App):
         rumps.quit_application()
 
 if __name__ == '__main__':
-    ClaudeBoard().run()
+    ClaudeWatch().run()
