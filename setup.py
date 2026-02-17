@@ -1,6 +1,6 @@
 from setuptools import setup
 
-APP = ['claudewatch.py']
+APP = ['claudewatch/__main__.py']
 DATA_FILES = []
 OPTIONS = {
     'argv_emulation': False,
@@ -14,7 +14,7 @@ OPTIONS = {
         'LSUIElement': True,  # Menu bar app, no dock icon
         'NSUserNotificationAlertStyle': 'alert',
     },
-    'packages': ['rumps', 'psutil'],
+    'packages': ['rumps', 'psutil', 'claudewatch'],
 }
 
 setup(
