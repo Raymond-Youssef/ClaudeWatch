@@ -1,7 +1,7 @@
 from setuptools import setup
 
 APP = ['claudewatch/__main__.py']
-DATA_FILES = []
+DATA_FILES = [('', ['icon.png'])]
 OPTIONS = {
     'argv_emulation': False,
     'iconfile': 'icon.png',

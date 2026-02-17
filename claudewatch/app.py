@@ -1,6 +1,7 @@
 """ClaudeWatch(rumps.App) — menu bar UI that wires together all modules."""
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -17,7 +18,11 @@ APP_NAME = 'ClaudeWatch'
 
 class ClaudeWatch(rumps.App):
     def __init__(self):
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'icon.png')
+        # When running as a py2app bundle, icon is in Resources/; otherwise relative to package
+        if getattr(sys, 'frozen', False):
+            icon_path = os.path.join(os.environ.get('RESOURCEPATH', ''), 'icon.png')
+        else:
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'icon.png')
         super(ClaudeWatch, self).__init__("ClaudeWatch", icon=icon_path, quit_button=None)
 
         self.session_mgr = SessionManager()
@@ -71,6 +76,20 @@ class ClaudeWatch(rumps.App):
         for pid, session in list(self.session_mgr.sessions.items()):
             if session['status'] != 'running' or pid not in active_pids:
                 continue
+
+            # Retry JSONL lookup if it was missing at session creation time
+            if not session.get('jsonl'):
+                cwd = session.get('cwd', '')
+                if cwd:
+                    jsonl_path = JsonlParser.find_session_jsonl(cwd, session['started_at'])
+                    if jsonl_path:
+                        session['jsonl'] = str(jsonl_path)
+                        title = JsonlParser.get_conversation_title(jsonl_path)
+                        if title:
+                            session['title'] = title
+                        self.session_mgr.save_sessions()
+                        self.update_menu()
+
             jsonl_str = session.get('jsonl', '')
             state = JsonlParser.get_session_state(jsonl_str)
             prev_state = session.get('last_state', 'active')

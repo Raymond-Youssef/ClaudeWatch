@@ -13,6 +13,23 @@ class JsonlParser:
         return Path.home() / '.claude' / 'projects' / project_dir_name
 
     @staticmethod
+    def _has_conversation(jsonl_path):
+        """Check if a JSONL file contains at least one user or assistant message."""
+        try:
+            with open(jsonl_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    obj = json.loads(line)
+                    role = obj.get('message', {}).get('role', '')
+                    if role in ('user', 'assistant'):
+                        return True
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
     def find_session_jsonl(cwd, process_create_time):
         """Find the JSONL file for a specific session by matching process creation time."""
         try:
@@ -44,7 +61,25 @@ class JsonlParser:
                     if sid and ts and sid not in session_first_ts:
                         session_first_ts[sid] = ts
 
+            # Also track the latest timestamp per session for recency
+            session_latest_ts = {}
+            with open(history_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    sid = obj.get('sessionId', '')
+                    ts = int(obj.get('timestamp', 0)) / 1000
+                    if sid and ts:
+                        session_latest_ts[sid] = max(session_latest_ts.get(sid, 0), ts)
+
             jsonl_by_uuid = {f.stem: f for f in jsonl_files}
+
+            # First try: match by process creation time
             best_match = None
             best_diff = float('inf')
             for uuid, path in jsonl_by_uuid.items():
@@ -56,7 +91,24 @@ class JsonlParser:
                     best_diff = diff
                     best_match = path
 
-            return best_match or max(jsonl_files, key=lambda f: f.stat().st_mtime)
+            # Validate the match has actual conversation content
+            if best_match and not JsonlParser._has_conversation(best_match):
+                best_match = None
+
+            if best_match:
+                return best_match
+
+            # Fallback: find the session with the most recent activity after process start
+            best_recent = None
+            best_recent_ts = 0
+            for uuid, path in jsonl_by_uuid.items():
+                latest = session_latest_ts.get(uuid, 0)
+                if latest >= process_create_time and latest > best_recent_ts:
+                    if JsonlParser._has_conversation(path):
+                        best_recent_ts = latest
+                        best_recent = path
+
+            return best_recent or max(jsonl_files, key=lambda f: f.stat().st_mtime)
         except Exception:
             return None
 
