@@ -144,15 +144,19 @@ class ClaudeWatch(rumps.App):
                     title = title[:40] + '...'
                 ide = session.get('ide', 'Terminal')
 
+                pid = session.get('pid', '')
                 title_label = f"{ide} - {title}  ({runtime})"
-                title_item = rumps.MenuItem(title_label, callback=lambda sender, s=session: self.focus_mgr.focus_session(s))
-                items_to_add.append((title_label, title_item))
+                # Use invisible Unicode suffix to ensure unique menu keys
+                uid = ''.join(chr(0x200B) for _ in range(int(pid) % 20 + 1)) + pid[-4:]
+                title_key = f"{title_label}{uid}"
+                title_item = rumps.MenuItem(title_key, callback=lambda sender, s=session: self.focus_mgr.focus_session(s))
+                items_to_add.append((title_key, title_item))
 
                 jsonl_str = session.get('jsonl', '')
                 jsonl_path = Path(jsonl_str) if jsonl_str else None
                 latest = JsonlParser.get_latest_response(jsonl_path) if jsonl_path else None
                 msg_text = latest.replace('\n', ' ')[:70] if latest else 'Waiting for response...'
-                msg_key = f"  {msg_text}"
+                msg_key = f"  {msg_text}{uid}"
                 msg_item = rumps.MenuItem(msg_key, callback=None)
                 items_to_add.append((msg_key, msg_item))
         else:
