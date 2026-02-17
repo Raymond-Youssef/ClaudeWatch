@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude Code Session Tracker - macOS Menu Bar App
+ClaudeBoard - macOS Menu Bar App
 Tracks all running Claude Code sessions across different IDEs and terminals.
 """
 
@@ -8,27 +8,27 @@ import rumps
 import psutil
 import json
 import os
-import glob as globmod
+import re
 from datetime import datetime
 from pathlib import Path
 import subprocess
 import threading
 import time
 
-class ClaudeTracker(rumps.App):
+APP_NAME = 'ClaudeBoard'
+
+class ClaudeBoard(rumps.App):
     def __init__(self):
-        super(ClaudeTracker, self).__init__("🤖", quit_button=None)
-        
+        super(ClaudeBoard, self).__init__("🤖", quit_button=None)
+
         # Setup data directory
-        self.data_dir = Path.home() / '.claude-tracker'
+        self.data_dir = Path.home() / '.claudeboard'
         self.data_dir.mkdir(exist_ok=True)
         self.sessions_file = self.data_dir / 'sessions.json'
-        self.logs_dir = self.data_dir / 'logs'
-        self.logs_dir.mkdir(exist_ok=True)
-        
+
         # Load existing sessions
         self.sessions = self.load_sessions()
-        
+
         # Track dynamic menu item keys so we can remove them later
         self.dynamic_menu_keys = []
 
@@ -37,7 +37,6 @@ class ClaudeTracker(rumps.App):
             rumps.MenuItem('Active Sessions', callback=None),
             rumps.separator,
             rumps.MenuItem('Refresh', callback=self.refresh_sessions),
-            rumps.MenuItem('Open Logs Folder', callback=self.open_logs),
             rumps.separator,
             rumps.MenuItem('Stats', callback=self.show_stats),
             rumps.separator,
@@ -53,35 +52,34 @@ class ClaudeTracker(rumps.App):
         self.monitoring = True
         self.monitor_thread = threading.Thread(target=self.monitor_processes, daemon=True)
         self.monitor_thread.start()
-        
+
         # Update menu
         self.update_menu()
-    
+
     def load_sessions(self):
         """Load sessions from disk"""
         if self.sessions_file.exists():
             try:
                 with open(self.sessions_file, 'r') as f:
                     return json.load(f)
-            except:
+            except Exception:
                 return {}
         return {}
-    
+
     def save_sessions(self):
         """Save sessions to disk"""
         with open(self.sessions_file, 'w') as f:
             json.dump(self.sessions, f, indent=2)
-    
+
     def monitor_processes(self):
         """Background thread to monitor claude-code processes"""
         while self.monitoring:
             self.scan_processes()
-            time.sleep(2)  # Check every 2 seconds
-    
+            time.sleep(2)
+
     def is_claude_code_process(self, proc_info):
         """Check if a process is a Claude Code CLI session"""
         cmdline = proc_info['cmdline'] or []
-        name = proc_info['name'] or ''
         cmdline_str = ' '.join(cmdline)
 
         # Skip Claude desktop app and its helpers
@@ -95,6 +93,21 @@ class ClaudeTracker(rumps.App):
                 return True
 
         return False
+
+    def is_waiting_for_input(self, jsonl_str):
+        """Check if a session is idle and waiting for user input"""
+        try:
+            if not jsonl_str:
+                return False
+            jsonl_path = Path(jsonl_str)
+            if not jsonl_path.exists():
+                return False
+            age = time.time() - jsonl_path.stat().st_mtime
+            if age < 10:
+                return False
+            return True
+        except Exception:
+            return False
 
     def scan_processes(self):
         """Scan for running claude-code processes"""
@@ -110,37 +123,65 @@ class ClaudeTracker(rumps.App):
                     if pid not in self.sessions:
                         # New session detected
                         cwd = self.get_session_cwd(pid) or ''
-                        title = self.get_conversation_title(cwd) if cwd else None
+                        create_time = proc.info['create_time']
+                        jsonl_path = self.find_session_jsonl(cwd, create_time) if cwd else None
+                        title = self.get_conversation_title(jsonl_path)
                         ide = self.detect_parent_ide(proc)
+                        tty = None
+                        try:
+                            tty = psutil.Process(int(pid)).terminal()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                         self.sessions[pid] = {
                             'pid': pid,
                             'title': title or 'New conversation',
-                            'started_at': proc.info['create_time'],
+                            'started_at': create_time,
                             'status': 'running',
                             'ide': ide,
                             'cwd': cwd,
-                            'notified': False
+                            'jsonl': str(jsonl_path) if jsonl_path else '',
+                            'tty': tty,
+                            'notified': False,
+                            'input_notified': False
                         }
                         self.save_sessions()
                         self.update_menu()
                         self.notify(f"New session in {ide}", (title or 'New conversation')[:100], pid)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-        
+
+        # Check for sessions waiting for input
+        for pid, session in list(self.sessions.items()):
+            if session['status'] != 'running' or pid not in active_pids:
+                continue
+            jsonl_str = session.get('jsonl', '')
+            waiting = self.is_waiting_for_input(jsonl_str)
+            if waiting and not session.get('input_notified', False):
+                session['input_notified'] = True
+                self.notify(
+                    f"Waiting for input in {session['ide']}",
+                    session.get('title', 'Unknown')[:100],
+                    pid
+                )
+                self.save_sessions()
+            elif not waiting and session.get('input_notified', False):
+                # User resumed — reset so we can notify again next time
+                session['input_notified'] = False
+                self.save_sessions()
+
         # Check for completed sessions
         for pid, session in list(self.sessions.items()):
             if session['status'] == 'running' and pid not in active_pids:
-                # Session completed
                 session['status'] = 'completed'
                 session['ended_at'] = time.time()
-                
+
                 if not session.get('notified', False):
-                    self.notify("Session completed ✓", session.get('title', 'Unknown')[:100], pid)
+                    self.notify("Session completed", session.get('title', 'Unknown')[:100], pid)
                     session['notified'] = True
-                
+
                 self.save_sessions()
                 self.update_menu()
-    
+
     def detect_parent_ide(self, proc):
         """Walk the ancestor process chain to detect the IDE/terminal"""
         ide_patterns = {
@@ -178,25 +219,62 @@ class ClaudeTracker(rumps.App):
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return None
 
-    def get_session_jsonl(self, cwd):
-        """Find the most recently modified JSONL conversation file for a project cwd"""
+    def get_project_dir(self, cwd):
+        """Convert a cwd to the Claude projects directory path"""
+        project_dir_name = re.sub(r'[^a-zA-Z0-9]', '-', cwd)
+        return Path.home() / '.claude' / 'projects' / project_dir_name
+
+    def find_session_jsonl(self, cwd, process_create_time):
+        """Find the JSONL file for a specific session by matching process creation time."""
         try:
-            import re
-            project_dir_name = re.sub(r'[^a-zA-Z0-9]', '-', cwd)
-            projects_base = Path.home() / '.claude' / 'projects' / project_dir_name
+            projects_base = self.get_project_dir(cwd)
             if not projects_base.is_dir():
                 return None
             jsonl_files = list(projects_base.glob('*.jsonl'))
             if not jsonl_files:
                 return None
-            return max(jsonl_files, key=lambda f: f.stat().st_mtime)
+            if len(jsonl_files) == 1:
+                return jsonl_files[0]
+
+            # Read history.jsonl to map session UUIDs to start timestamps
+            history_path = Path.home() / '.claude' / 'history.jsonl'
+            if not history_path.exists():
+                return max(jsonl_files, key=lambda f: f.stat().st_mtime)
+
+            session_first_ts = {}
+            with open(history_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    sid = obj.get('sessionId', '')
+                    ts = int(obj.get('timestamp', 0)) / 1000
+                    if sid and ts and sid not in session_first_ts:
+                        session_first_ts[sid] = ts
+
+            jsonl_by_uuid = {f.stem: f for f in jsonl_files}
+            best_match = None
+            best_diff = float('inf')
+            for uuid, path in jsonl_by_uuid.items():
+                ts = session_first_ts.get(uuid)
+                if ts is None:
+                    continue
+                diff = ts - process_create_time
+                if 0 <= diff < 30 and diff < best_diff:
+                    best_diff = diff
+                    best_match = path
+
+            return best_match or max(jsonl_files, key=lambda f: f.stat().st_mtime)
         except Exception:
             return None
 
-    def get_conversation_title(self, cwd):
+    def get_conversation_title(self, jsonl_path):
         """Get the conversation title (first user text message) from the JSONL"""
         try:
-            jsonl_path = self.get_session_jsonl(cwd)
             if not jsonl_path:
                 return None
             with open(jsonl_path, 'r') as f:
@@ -218,14 +296,12 @@ class ClaudeTracker(rumps.App):
             pass
         return None
 
-    def get_latest_response(self, cwd):
+    def get_latest_response(self, jsonl_path):
         """Get the latest assistant text response from the JSONL"""
         try:
-            jsonl_path = self.get_session_jsonl(cwd)
             if not jsonl_path:
                 return None
             with open(jsonl_path, 'rb') as f:
-                # Read last 50KB to avoid loading huge files
                 f.seek(0, 2)
                 size = f.tell()
                 f.seek(max(0, size - 50000))
@@ -246,10 +322,9 @@ class ClaudeTracker(rumps.App):
         except Exception:
             pass
         return None
-    
+
     def update_menu(self):
         """Update the menu bar with current sessions"""
-        # Remove previously added dynamic items
         for key in self.dynamic_menu_keys:
             try:
                 del self.menu[key]
@@ -257,16 +332,13 @@ class ClaudeTracker(rumps.App):
                 pass
         self.dynamic_menu_keys = []
 
-        # Get active sessions
         active = [s for s in self.sessions.values() if s['status'] == 'running']
 
-        # Update title with count
         if active:
             self.title = f"🤖 {len(active)}"
         else:
             self.title = "🤖"
 
-        # Build dynamic items to insert after "Active Sessions" header
         items_to_add = []
         if active:
             for session in sorted(active, key=lambda x: x['started_at'], reverse=True):
@@ -276,26 +348,26 @@ class ClaudeTracker(rumps.App):
                     title = title[:40] + '...'
                 ide = session.get('ide', 'Terminal')
 
-                # Title line: secondary (grayed out, no callback)
+                # Title line: primary/white (clickable, focuses IDE)
                 title_label = f"{ide} - {title}  ({runtime})"
-                title_item = rumps.MenuItem(title_label, callback=None)
+                title_item = rumps.MenuItem(title_label, callback=lambda sender, s=session: self.show_session(s))
                 items_to_add.append((title_label, title_item))
 
-                # Last message: primary/white (clickable, focuses IDE)
-                cwd = session.get('cwd', '')
-                latest = self.get_latest_response(cwd) if cwd else None
+                # Last message: secondary (grayed out)
+                jsonl_str = session.get('jsonl', '')
+                jsonl_path = Path(jsonl_str) if jsonl_str else None
+                latest = self.get_latest_response(jsonl_path) if jsonl_path else None
                 msg_text = latest.replace('\n', ' ')[:70] if latest else 'Waiting for response...'
                 msg_key = f"  {msg_text}"
-                msg_item = rumps.MenuItem(msg_key, callback=lambda sender, s=session: self.show_session(s))
+                msg_item = rumps.MenuItem(msg_key, callback=None)
                 items_to_add.append((msg_key, msg_item))
         else:
             items_to_add.append(('No active sessions', rumps.MenuItem('No active sessions', callback=None)))
 
-        # Insert items right after the "Active Sessions" header
         for key, item in reversed(items_to_add):
             self.menu.insert_after('Active Sessions', item)
             self.dynamic_menu_keys.append(key)
-    
+
     def format_duration(self, seconds):
         """Format duration in human readable form"""
         if seconds < 60:
@@ -304,43 +376,39 @@ class ClaudeTracker(rumps.App):
             return f"{int(seconds/60)}m"
         else:
             return f"{int(seconds/3600)}h {int((seconds%3600)/60)}m"
-    
+
     def show_session(self, session):
         """Click a session to focus its IDE/terminal window"""
         self.focus_ide(session)
-    
+
     def refresh_sessions(self, _):
         """Manually refresh sessions"""
         self.scan_processes()
         self.update_menu()
-        rumps.notification('Claude Tracker', 'Refreshed', 'Session list updated')
-    
-    def open_logs(self, _):
-        """Open logs folder in Finder"""
-        subprocess.run(['open', str(self.logs_dir)])
-    
+        rumps.notification(APP_NAME, 'Refreshed', 'Session list updated')
+
     def show_stats(self, _):
         """Show statistics"""
         active = [s for s in self.sessions.values() if s['status'] == 'running']
-        completed_today = [s for s in self.sessions.values() 
-                          if s['status'] == 'completed' 
+        completed_today = [s for s in self.sessions.values()
+                          if s['status'] == 'completed'
                           and s.get('ended_at', 0) > time.time() - 86400]
         total = len(self.sessions)
-        
+
         msg = f"Active sessions: {len(active)}\n"
         msg += f"Completed today: {len(completed_today)}\n"
         msg += f"Total tracked: {total}\n\n"
-        
+
         if completed_today:
-            avg_duration = sum(s.get('ended_at', 0) - s['started_at'] 
+            avg_duration = sum(s.get('ended_at', 0) - s['started_at']
                              for s in completed_today) / len(completed_today)
             msg += f"Avg session time today: {self.format_duration(avg_duration)}"
-        
-        rumps.alert('Stats', msg)
-    
+
+        rumps.alert(APP_NAME, msg)
+
     def notify(self, title, message, pid=None):
         """Send macOS notification with session PID as data"""
-        rumps.notification('Claude Tracker', title, message, data={'pid': pid} if pid else None)
+        rumps.notification(APP_NAME, title, message, data={'pid': pid} if pid else None)
 
     def handle_notification(self, info):
         """Handle notification click — focus the IDE window for the session"""
@@ -351,9 +419,10 @@ class ClaudeTracker(rumps.App):
                 self.focus_ide(session)
 
     def focus_ide(self, session):
-        """Bring the IDE/terminal window for a session to the foreground"""
+        """Bring the IDE/terminal window for a session to the foreground, focusing the exact tab if possible"""
         ide = session.get('ide', '')
-        # Map our IDE labels to macOS application names
+        tty = session.get('tty', '')
+
         app_name_map = {
             'VS Code': 'Visual Studio Code',
             'RubyMine': 'RubyMine',
@@ -362,13 +431,60 @@ class ClaudeTracker(rumps.App):
             'WebStorm': 'WebStorm',
             'GoLand': 'GoLand',
             'Cursor': 'Cursor',
-            'iTerm': 'iTerm',
+            'iTerm': 'iTerm2',
             'Terminal': 'Terminal',
             'Warp': 'Warp',
             'Alacritty': 'Alacritty',
             'Kitty': 'kitty',
         }
         app_name = app_name_map.get(ide, ide)
+
+        # For Terminal.app: select exact tab by TTY
+        if ide == 'Terminal' and tty:
+            try:
+                subprocess.run(['osascript', '-e', f'''
+                    tell application "Terminal"
+                        activate
+                        repeat with w in windows
+                            repeat with t in tabs of w
+                                if tty of t is "{tty}" then
+                                    set selected of t to true
+                                    set index of w to 1
+                                    return
+                                end if
+                            end repeat
+                        end repeat
+                    end tell
+                '''], timeout=3)
+                return
+            except Exception:
+                pass
+
+        # For iTerm2: select exact session by TTY
+        if ide == 'iTerm' and tty:
+            try:
+                subprocess.run(['osascript', '-e', f'''
+                    tell application "iTerm2"
+                        activate
+                        repeat with w in windows
+                            repeat with t in tabs of w
+                                repeat with s in sessions of t
+                                    if tty of s is "{tty}" then
+                                        select t
+                                        select s
+                                        set index of w to 1
+                                        return
+                                    end if
+                                end repeat
+                            end repeat
+                        end repeat
+                    end tell
+                '''], timeout=3)
+                return
+            except Exception:
+                pass
+
+        # Fallback: activate the application
         if app_name:
             try:
                 subprocess.run([
@@ -384,4 +500,4 @@ class ClaudeTracker(rumps.App):
         rumps.quit_application()
 
 if __name__ == '__main__':
-    ClaudeTracker().run()
+    ClaudeBoard().run()

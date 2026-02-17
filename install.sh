@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-echo "🤖 Claude Code Session Tracker - Installation"
-echo "=============================================="
+echo "🤖 ClaudeBoard - Installation"
+echo "=============================="
 echo ""
 
 # Check for Python 3
@@ -23,19 +23,19 @@ pip3 install -r requirements.txt
 chmod +x claude-tracker.py
 
 # Create launch agent for auto-start (optional)
-read -p "Do you want Claude Tracker to start automatically on login? (y/n) " -n 1 -r
+read -p "Do you want ClaudeBoard to start automatically on login? (y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    PLIST_PATH=~/Library/LaunchAgents/com.claude-tracker.plist
+    PLIST_PATH=~/Library/LaunchAgents/com.claudeboard.plist
     SCRIPT_PATH="$(pwd)/claude-tracker.py"
-    
+
     cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.claude-tracker</string>
+    <string>com.claudeboard</string>
     <key>ProgramArguments</key>
     <array>
         <string>$SCRIPT_PATH</string>
@@ -47,7 +47,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
 </dict>
 </plist>
 EOF
-    
+
     launchctl load "$PLIST_PATH"
     echo "✓ Auto-start configured"
 fi
@@ -55,7 +55,7 @@ fi
 echo ""
 echo "✅ Installation complete!"
 echo ""
-echo "To start the tracker:"
+echo "To start ClaudeBoard:"
 echo "  ./claude-tracker.py"
 echo ""
 echo "Look for the 🤖 icon in your menu bar!"
