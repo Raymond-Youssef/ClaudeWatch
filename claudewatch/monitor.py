@@ -43,7 +43,7 @@ class ProcessMonitor:
     def _loop(self):
         while self._running:
             self._on_scan()
-            time.sleep(2)
+            time.sleep(5)
 
     def scan_processes(self):
         """Scan for running claude-code processes.

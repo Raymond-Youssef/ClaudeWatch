@@ -42,10 +42,7 @@ class ClaudeWatch(rumps.App):
             rumps.MenuItem('Quit', callback=self.quit_app),
         ]
 
-        @rumps.notifications
-        def _on_notification(info):
-            self._handle_notification(info)
-
+        self.notifier.register_handler(self._handle_notification)
         self.monitor.start()
         self.update_menu()
 
@@ -170,7 +167,7 @@ class ClaudeWatch(rumps.App):
         """Manually refresh sessions."""
         self._on_monitor_scan()
         self.update_menu()
-        rumps.notification(APP_NAME, 'Refreshed', 'Session list updated')
+        self.notifier.notify('Refreshed', 'Session list updated')
 
     def show_stats(self, _):
         """Show statistics."""

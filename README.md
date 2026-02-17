@@ -16,7 +16,7 @@ A lightweight macOS menu bar app that tracks all your Claude Code sessions acros
 ## Installation
 
 ### Prerequisites
-- macOS
+- macOS 10.14 (Mojave) or later
 - Python 3.7+
 - Claude Code installed
 

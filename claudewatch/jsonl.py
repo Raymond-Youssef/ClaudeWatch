@@ -4,6 +4,21 @@ import json
 import re
 from pathlib import Path
 
+_XML_TAG_RE = re.compile(r'<[^>]+>')
+_SYSTEM_TAG_BLOCK_RE = re.compile(r'<(local-command-caveat|system-reminder|command-name|command-message|command-args|local-command-stdout)[^>]*>.*?</\1>', re.DOTALL)
+
+
+def _strip_system_tags(text):
+    """Remove entire system-injected tag blocks (including their content)."""
+    return _SYSTEM_TAG_BLOCK_RE.sub('', text).strip()
+
+
+def _strip_xml_tags(text):
+    """Strip XML/HTML-like tags and collapse whitespace."""
+    cleaned = _strip_system_tags(text)
+    cleaned = _XML_TAG_RE.sub('', cleaned).strip()
+    return re.sub(r'\s+', ' ', cleaned)
+
 
 class JsonlParser:
     @staticmethod
@@ -128,11 +143,15 @@ class JsonlParser:
                     if msg.get('role') == 'user':
                         content = msg.get('content', '')
                         if isinstance(content, str) and content.strip():
-                            return content.strip()
+                            cleaned = _strip_xml_tags(content)
+                            if cleaned:
+                                return cleaned
                         if isinstance(content, list):
                             for block in content:
                                 if isinstance(block, dict) and block.get('type') == 'text' and block.get('text', '').strip():
-                                    return block['text'].strip()
+                                    cleaned = _strip_xml_tags(block['text'])
+                                    if cleaned:
+                                        return cleaned
         except Exception:
             pass
         return None
@@ -160,7 +179,7 @@ class JsonlParser:
                 if msg.get('role') == 'assistant':
                     for block in msg.get('content', []):
                         if block.get('type') == 'text' and block.get('text', '').strip():
-                            return block['text'].strip()
+                            return _strip_xml_tags(block['text'])
         except Exception:
             pass
         return None

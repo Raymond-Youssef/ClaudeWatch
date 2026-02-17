@@ -27,9 +27,17 @@ class SessionManager:
         with open(self.sessions_file, 'w') as f:
             json.dump(self.sessions, f, indent=2)
 
-    def add_session(self, pid, title, create_time, ide, cwd, jsonl_path, tty):
-        """Register a new session."""
-        self.sessions[pid] = {
+    @staticmethod
+    def convo_id_for(jsonl_path, pid):
+        """Derive a conversation ID: JSONL stem UUID if available, else pid-{pid}."""
+        if jsonl_path:
+            return Path(jsonl_path).stem
+        return f"pid-{pid}"
+
+    def add_session(self, convo_id, pid, title, create_time, ide, cwd, jsonl_path, tty):
+        """Register a new session keyed by conversation ID."""
+        self.sessions[convo_id] = {
+            'convo_id': convo_id,
             'pid': pid,
             'title': title or 'New conversation',
             'started_at': create_time,
@@ -43,21 +51,45 @@ class SessionManager:
         }
         self.save_sessions()
 
-    def complete_session(self, pid):
+    def complete_session(self, convo_id):
         """Mark a session as completed."""
-        session = self.sessions.get(pid)
+        session = self.sessions.get(convo_id)
         if session:
             session['status'] = 'completed'
             session['ended_at'] = time.time()
             session['notified'] = True
             self.save_sessions()
 
-    def update_state(self, pid, state):
+    def update_state(self, convo_id, state):
         """Update the last_state for a session."""
-        session = self.sessions.get(pid)
+        session = self.sessions.get(convo_id)
         if session and state != 'unknown':
             session['last_state'] = state
             self.save_sessions()
+
+    def find_by_pid(self, pid):
+        """Find an active session by its PID. Returns (convo_id, session) or (None, None)."""
+        for cid, session in self.sessions.items():
+            if session.get('pid') == pid and session['status'] == 'running':
+                return cid, session
+        return None, None
+
+    def find_by_jsonl(self, jsonl_path):
+        """Find an active session by its JSONL path. Returns (convo_id, session) or (None, None)."""
+        path_str = str(jsonl_path)
+        for cid, session in self.sessions.items():
+            if session.get('jsonl') == path_str and session['status'] == 'running':
+                return cid, session
+        return None, None
+
+    def rekey(self, old_id, new_id):
+        """Re-key a session (e.g. when JSONL is discovered for a pid-keyed session)."""
+        if old_id == new_id or old_id not in self.sessions:
+            return
+        session = self.sessions.pop(old_id)
+        session['convo_id'] = new_id
+        self.sessions[new_id] = session
+        self.save_sessions()
 
     def get_active(self):
         """Return list of sessions with status 'running'."""
