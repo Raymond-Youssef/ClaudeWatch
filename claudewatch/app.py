@@ -53,25 +53,32 @@ class ClaudeWatch(rumps.App):
 
         # Detect new sessions
         for pid, meta in active_procs.items():
-            if pid not in self.session_mgr.sessions:
-                cwd = meta['cwd'] or ''
-                jsonl_path = JsonlParser.find_session_jsonl(cwd, meta['create_time']) if cwd else None
-                title = JsonlParser.get_conversation_title(jsonl_path)
-                self.session_mgr.add_session(
-                    pid=pid,
-                    title=title,
-                    create_time=meta['create_time'],
-                    ide=meta['ide'],
-                    cwd=cwd,
-                    jsonl_path=jsonl_path,
-                    tty=meta['tty'],
-                )
-                self.update_menu()
-                self.notifier.notify(f"New session in {meta['ide']}", (title or 'New conversation')[:100], pid)
+            cid, _ = self.session_mgr.find_by_pid(pid)
+            if cid is not None:
+                continue
+            cwd = meta['cwd'] or ''
+            jsonl_path = JsonlParser.find_session_jsonl(cwd, meta['create_time']) if cwd else None
+            convo_id = SessionManager.convo_id_for(jsonl_path, pid)
+            if convo_id in self.session_mgr.sessions:
+                continue
+            title = JsonlParser.get_conversation_title(jsonl_path)
+            self.session_mgr.add_session(
+                convo_id=convo_id,
+                pid=pid,
+                title=title,
+                create_time=meta['create_time'],
+                ide=meta['ide'],
+                cwd=cwd,
+                jsonl_path=jsonl_path,
+                tty=meta['tty'],
+            )
+            self.update_menu()
+            self.notifier.notify(f"New session in {meta['ide']}", (title or 'New conversation')[:100], pid)
 
         # Check state transitions for running sessions
-        for pid, session in list(self.session_mgr.sessions.items()):
-            if session['status'] != 'running' or pid not in active_pids:
+        active_pids_set = set(str(p) for p in active_pids)
+        for convo_id, session in list(self.session_mgr.sessions.items()):
+            if session['status'] != 'running' or session.get('pid') not in active_pids_set:
                 continue
 
             # Retry JSONL lookup if it was missing at session creation time
@@ -84,8 +91,10 @@ class ClaudeWatch(rumps.App):
                         title = JsonlParser.get_conversation_title(jsonl_path)
                         if title:
                             session['title'] = title
-                        self.session_mgr.save_sessions()
+                        new_id = SessionManager.convo_id_for(jsonl_path, session['pid'])
+                        self.session_mgr.rekey(convo_id, new_id)
                         self.update_menu()
+                        continue
 
             jsonl_str = session.get('jsonl', '')
             state = JsonlParser.get_session_state(jsonl_str)
@@ -93,26 +102,28 @@ class ClaudeWatch(rumps.App):
 
             if state != prev_state and state in ('waiting_tool', 'waiting_input'):
                 title = session.get('title', 'Unknown')[:100]
+                pid = session.get('pid')
                 if state == 'waiting_tool':
                     self.notifier.notify(f"Needs approval in {session['ide']}", title, pid)
                 else:
                     self.notifier.notify(f"Waiting for input in {session['ide']}", title, pid)
 
-            self.session_mgr.update_state(pid, state)
+            self.session_mgr.update_state(convo_id, state)
 
         # Detect completed sessions
-        for pid, session in list(self.session_mgr.sessions.items()):
-            if session['status'] == 'running' and pid not in active_pids:
+        active_pids_set = set(str(p) for p in active_pids)
+        for convo_id, session in list(self.session_mgr.sessions.items()):
+            if session['status'] == 'running' and session.get('pid') not in active_pids_set:
                 if not session.get('notified', False):
-                    self.notifier.notify("Session completed", session.get('title', 'Unknown')[:100], pid)
-                self.session_mgr.complete_session(pid)
+                    self.notifier.notify("Session completed", session.get('title', 'Unknown')[:100], session.get('pid'))
+                self.session_mgr.complete_session(convo_id)
                 self.update_menu()
 
     def _handle_notification(self, info):
         """Handle notification click — focus the IDE window for the session."""
         pid = info.get('pid') if info else None
         if pid:
-            session = self.session_mgr.sessions.get(str(pid))
+            _, session = self.session_mgr.find_by_pid(str(pid))
             if session:
                 self.focus_mgr.focus_session(session)
 
@@ -141,10 +152,10 @@ class ClaudeWatch(rumps.App):
                     title = title[:40] + '...'
                 ide = session.get('ide', 'Terminal')
 
-                pid = session.get('pid', '')
+                convo_id = session.get('convo_id', '')
                 title_label = f"{ide} - {title}  ({runtime})"
                 # Use invisible Unicode suffix to ensure unique menu keys
-                uid = ''.join(chr(0x200B) for _ in range(int(pid) % 20 + 1)) + pid[-4:]
+                uid = ''.join(chr(0x200B) for _ in range(hash(convo_id) % 20 + 1))
                 title_key = f"{title_label}{uid}"
                 title_item = rumps.MenuItem(title_key, callback=lambda sender, s=session: self.focus_mgr.focus_session(s))
                 items_to_add.append((title_key, title_item))
