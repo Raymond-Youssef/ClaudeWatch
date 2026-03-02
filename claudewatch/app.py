@@ -31,10 +31,12 @@ class ClaudeWatch(rumps.App):
         self.monitor = ProcessMonitor(on_scan=self._on_monitor_scan)
 
         self.dynamic_menu_keys = []
+        self._paused = False
 
         self.menu = [
             rumps.MenuItem('Active Sessions', callback=None),
             rumps.separator,
+            rumps.MenuItem('Pause Monitoring', callback=self.toggle_pause),
             rumps.MenuItem('Refresh', callback=self.refresh_sessions),
             rumps.separator,
             rumps.MenuItem('Stats', callback=self.show_stats),
@@ -46,8 +48,19 @@ class ClaudeWatch(rumps.App):
         self.monitor.start()
         self.update_menu()
 
+    def toggle_pause(self, sender):
+        """Pause or resume monitoring."""
+        self._paused = not self._paused
+        sender.title = 'Resume Monitoring' if self._paused else 'Pause Monitoring'
+        if self._paused:
+            self.title = " ⏸"
+        else:
+            self.update_menu()
+
     def _on_monitor_scan(self):
         """Callback invoked by ProcessMonitor on each scan cycle."""
+        if self._paused:
+            return
         active_procs = self.monitor.scan_processes()
         active_pids = set(active_procs.keys())
 

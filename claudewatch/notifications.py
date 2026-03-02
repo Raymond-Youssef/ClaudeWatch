@@ -1,5 +1,6 @@
 """Notifier — sending + handling macOS notifications via UNUserNotificationCenter."""
 
+import time
 import uuid
 
 import objc
@@ -109,11 +110,15 @@ class NotificationDelegate(NSObject):
         completion_handler()
 
 
+COOLDOWN_SECONDS = 30
+
+
 class Notifier:
     def __init__(self):
         self._center = UNUserNotificationCenter.currentNotificationCenter()
         self._delegate = NotificationDelegate.alloc().init()
         self._center.setDelegate_(self._delegate)
+        self._history: dict[str, float] = {}
         self._request_authorization()
 
     def _request_authorization(self):
@@ -127,7 +132,18 @@ class Notifier:
             pass
 
     def notify(self, title, message, pid=None):
-        """Send a notification via UNUserNotificationCenter."""
+        """Send a notification via UNUserNotificationCenter.
+
+        Duplicate notifications (same title + message) are suppressed
+        for COOLDOWN_SECONDS to avoid spamming the user.
+        """
+        dedup_key = f"{title}:{message}"
+        now = time.monotonic()
+        last_sent = self._history.get(dedup_key)
+        if last_sent is not None and (now - last_sent) < COOLDOWN_SECONDS:
+            return
+        self._history[dedup_key] = now
+
         content = UNMutableNotificationContent.alloc().init()
         content.setTitle_(APP_NAME)
         content.setSubtitle_(title)
@@ -145,7 +161,3 @@ class Notifier:
     def register_handler(self, callback):
         """Register a callback for notification clicks."""
         self._delegate.setClickCallback_(callback)
-
-    def handle_click(self, info):
-        """Called by the app's @rumps.notifications handler (kept for compatibility)."""
-        pass
