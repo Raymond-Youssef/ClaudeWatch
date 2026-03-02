@@ -1,5 +1,7 @@
 """FocusManager — AppleScript IDE/terminal focusing."""
 
+import os
+import plistlib
 import re
 import subprocess
 
@@ -9,6 +11,7 @@ _SAFE_TTY_RE = re.compile(r'[^a-zA-Z0-9/]')
 
 
 class FocusManager:
+    _icon_cache = {}  # class-level cache: ide_label -> icns_path or None
     APP_NAME_MAP = {
         'VS Code': 'Visual Studio Code',
         'RubyMine': 'RubyMine',
@@ -36,6 +39,34 @@ class FocusManager:
             return front and front.localizedName() == app_name
         except Exception:
             return False
+
+    def get_app_icon(self, ide_label):
+        """Return the path to the .icns icon for an IDE/terminal, or None."""
+        if ide_label in self._icon_cache:
+            return self._icon_cache[ide_label]
+
+        app_name = self.APP_NAME_MAP.get(ide_label, ide_label)
+        icon_path = None
+        try:
+            ws = NSWorkspace.sharedWorkspace()
+            app_path = ws.fullPathForApplication_(app_name)
+            if app_path:
+                plist_path = os.path.join(app_path, 'Contents', 'Info.plist')
+                if os.path.exists(plist_path):
+                    with open(plist_path, 'rb') as f:
+                        plist = plistlib.load(f)
+                    icon_file = plist.get('CFBundleIconFile', '')
+                    if icon_file:
+                        if not icon_file.endswith('.icns'):
+                            icon_file += '.icns'
+                        candidate = os.path.join(app_path, 'Contents', 'Resources', icon_file)
+                        if os.path.exists(candidate):
+                            icon_path = candidate
+        except Exception:
+            pass
+
+        self._icon_cache[ide_label] = icon_path
+        return icon_path
 
     def focus_session(self, session):
         """Bring the IDE/terminal window for a session to the foreground."""

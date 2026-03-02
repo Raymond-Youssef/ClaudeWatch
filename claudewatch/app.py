@@ -17,7 +17,7 @@ from claudewatch.session import SessionManager
 from claudewatch.watcher import JsonlWatcher
 
 APP_NAME = 'ClaudeWatch'
-DISCOVERY_INTERVAL = 12  # seconds between process scans
+DISCOVERY_INTERVAL = 5  # seconds between process scans
 
 
 class ClaudeWatch(rumps.App):
@@ -265,9 +265,12 @@ class ClaudeWatch(rumps.App):
                 title_counts[base_label] = count + 1
                 title_key = f"{base_label} #{count}" if count > 0 else base_label
 
+                icon_path = self.focus_mgr.get_app_icon(ide)
                 title_item = rumps.MenuItem(
                     title_key,
                     callback=lambda sender, s=session: self.focus_mgr.focus_session(s),
+                    icon=icon_path,
+                    dimensions=(18, 18),
                 )
                 items_to_add.append((title_key, title_item))
 
