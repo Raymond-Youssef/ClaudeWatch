@@ -55,7 +55,7 @@ class JsonlParser:
             if not jsonl_files:
                 return None
             if len(jsonl_files) == 1:
-                return jsonl_files[0]
+                return jsonl_files[0] if JsonlParser._has_conversation(jsonl_files[0]) else None
 
             history_path = Path.home() / '.claude' / 'history.jsonl'
             if not history_path.exists():
@@ -110,7 +110,10 @@ class JsonlParser:
                         best_recent_ts = latest
                         best_recent = path
 
-            return best_recent or max(jsonl_files, key=lambda f: f.stat().st_mtime)
+            if best_recent:
+                return best_recent
+            fallback = max(jsonl_files, key=lambda f: f.stat().st_mtime)
+            return fallback if JsonlParser._has_conversation(fallback) else None
         except Exception:
             return None
 
@@ -162,11 +165,17 @@ class JsonlParser:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if obj.get('type') not in ('user', 'assistant'):
+                    continue
                 msg = obj.get('message', {})
                 if msg.get('role') == 'assistant':
+                    # Return the last text block (most relevant content)
+                    last_text = None
                     for block in msg.get('content', []):
                         if block.get('type') == 'text' and block.get('text', '').strip():
-                            return _strip_xml_tags(block['text'])
+                            last_text = _strip_xml_tags(block['text'])
+                    if last_text:
+                        return last_text
         except Exception:
             pass
         return None
