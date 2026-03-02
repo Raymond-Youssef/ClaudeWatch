@@ -1,49 +1,34 @@
-"""ProcessMonitor — background process scanning for Claude Code sessions."""
+"""ProcessMonitor — process discovery for Claude Code sessions."""
 
 import os
-import threading
-import time
 
 import psutil
 
 
 class ProcessMonitor:
+    """Scans for running Claude Code processes.
+
+    This is a stateless discovery module — it does not run its own thread.
+    The caller is responsible for invoking scan_processes() on a timer.
+    """
+
     IDE_PATTERNS = {
         'rubymine': 'RubyMine',
         'code helper': 'VS Code',
         'vscode': 'VS Code',
-        'electron': 'VS Code',
+        'cursor': 'Cursor',
+        'claude': 'Claude',
         'pycharm': 'PyCharm',
         'intellij': 'IntelliJ',
         'webstorm': 'WebStorm',
         'goland': 'GoLand',
-        'cursor': 'Cursor',
         'iterm': 'iTerm',
         'terminal': 'Terminal',
         'warp': 'Warp',
         'alacritty': 'Alacritty',
         'kitty': 'Kitty',
+        'electron': 'VS Code',
     }
-
-    def __init__(self, on_scan):
-        self._on_scan = on_scan
-        self._running = False
-        self._thread = None
-
-    def start(self):
-        """Start the background monitoring thread."""
-        self._running = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        """Signal the monitoring thread to stop."""
-        self._running = False
-
-    def _loop(self):
-        while self._running:
-            self._on_scan()
-            time.sleep(5)
 
     def scan_processes(self):
         """Scan for running claude-code processes.
@@ -64,7 +49,7 @@ class ProcessMonitor:
                     results[pid] = {
                         'cmdline': cmdline,
                         'create_time': proc.info['create_time'],
-                        'cwd': self.get_session_cwd(pid),
+                        'cwd': self._get_session_cwd(pid),
                         'ide': self.detect_parent_ide(proc),
                         'tty': tty,
                     }
@@ -103,7 +88,7 @@ class ProcessMonitor:
         return 'Terminal'
 
     @staticmethod
-    def get_session_cwd(pid):
+    def _get_session_cwd(pid):
         """Get the working directory of a process."""
         try:
             return psutil.Process(int(pid)).cwd()

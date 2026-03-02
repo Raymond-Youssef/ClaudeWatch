@@ -1,6 +1,9 @@
 """FocusManager — AppleScript IDE/terminal focusing."""
 
+import re
 import subprocess
+
+_SAFE_TTY_RE = re.compile(r'[^a-zA-Z0-9/]')
 
 
 class FocusManager:
@@ -12,6 +15,7 @@ class FocusManager:
         'WebStorm': 'WebStorm',
         'GoLand': 'GoLand',
         'Cursor': 'Cursor',
+        'Claude': 'Claude',
         'iTerm': 'iTerm2',
         'Terminal': 'Terminal',
         'Warp': 'Warp',
@@ -22,7 +26,7 @@ class FocusManager:
     def focus_session(self, session):
         """Bring the IDE/terminal window for a session to the foreground."""
         ide = session.get('ide', '')
-        tty = session.get('tty', '')
+        tty = _SAFE_TTY_RE.sub('', session.get('tty') or '')
 
         if ide == 'Terminal' and tty:
             if self._focus_terminal(tty):

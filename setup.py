@@ -14,7 +14,7 @@ OPTIONS = {
         'LSUIElement': True,  # Menu bar app, no dock icon
         'NSUserNotificationAlertStyle': 'alert',
     },
-    'packages': ['rumps', 'psutil', 'claudewatch'],
+    'packages': ['rumps', 'psutil', 'watchdog', 'claudewatch'],
 }
 
 setup(

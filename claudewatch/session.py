@@ -1,6 +1,8 @@
 """SessionManager — session state + JSON persistence."""
 
 import json
+import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -23,9 +25,19 @@ class SessionManager:
         return {}
 
     def save_sessions(self):
-        """Save sessions to disk."""
-        with open(self.sessions_file, 'w') as f:
-            json.dump(self.sessions, f, indent=2)
+        """Save sessions to disk atomically via temp file + rename."""
+        try:
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self.data_dir), suffix='.tmp'
+            )
+            with os.fdopen(fd, 'w') as f:
+                json.dump(self.sessions, f, indent=2)
+            os.replace(tmp_path, str(self.sessions_file))
+        except OSError:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     @staticmethod
     def convo_id_for(jsonl_path, pid):
@@ -67,10 +79,29 @@ class SessionManager:
             session['last_state'] = state
             self.save_sessions()
 
-    def find_by_pid(self, pid):
-        """Find an active session by its PID. Returns (convo_id, session) or (None, None)."""
+    def prune_old_sessions(self, max_age=86400 * 7):
+        """Remove completed sessions older than max_age seconds."""
+        cutoff = time.time() - max_age
+        to_remove = [
+            cid for cid, s in self.sessions.items()
+            if s['status'] == 'completed' and s.get('ended_at', 0) < cutoff
+        ]
+        if to_remove:
+            for cid in to_remove:
+                del self.sessions[cid]
+            self.save_sessions()
+
+    def find_by_pid(self, pid, create_time=None):
+        """Find an active session by its PID. Returns (convo_id, session) or (None, None).
+
+        If create_time is provided, rejects matches where the session's started_at
+        differs by more than 2 seconds (guards against PID reuse).
+        """
         for cid, session in self.sessions.items():
             if session.get('pid') == pid and session['status'] == 'running':
+                if create_time is not None:
+                    if abs(session['started_at'] - create_time) > 2:
+                        continue
                 return cid, session
         return None, None
 

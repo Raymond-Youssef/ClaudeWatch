@@ -7,9 +7,14 @@ import objc
 
 APP_NAME = 'ClaudeWatch'
 
+_framework_loaded = False
+
 
 def _load_un_framework():
     """Load UserNotifications framework and register required block signatures."""
+    global _framework_loaded
+    if _framework_loaded:
+        return
     objc.registerMetaDataForSelector(
         b'UNUserNotificationCenter',
         b'requestAuthorizationWithOptions:completionHandler:',
@@ -50,22 +55,10 @@ def _load_un_framework():
         bundle_path='/System/Library/Frameworks/UserNotifications.framework',
         module_globals=globals(),
     )
-
-
-_load_un_framework()
-
-UNUserNotificationCenter = objc.lookUpClass('UNUserNotificationCenter')
-UNMutableNotificationContent = objc.lookUpClass('UNMutableNotificationContent')
-UNNotificationRequest = objc.lookUpClass('UNNotificationRequest')
-
-
-class _DelegateBase:
-    """Protocol methods for UNUserNotificationCenterDelegate."""
-    pass
+    _framework_loaded = True
 
 
 NSObject = objc.lookUpClass('NSObject')
-
 
 # Register the delegate protocol methods so PyObjC knows about the signatures
 objc.registerMetaDataForSelector(
@@ -115,6 +108,10 @@ COOLDOWN_SECONDS = 30
 
 class Notifier:
     def __init__(self):
+        _load_un_framework()
+        UNUserNotificationCenter = objc.lookUpClass('UNUserNotificationCenter')
+        self._UNMutableNotificationContent = objc.lookUpClass('UNMutableNotificationContent')
+        self._UNNotificationRequest = objc.lookUpClass('UNNotificationRequest')
         self._center = UNUserNotificationCenter.currentNotificationCenter()
         self._delegate = NotificationDelegate.alloc().init()
         self._center.setDelegate_(self._delegate)
@@ -144,14 +141,19 @@ class Notifier:
             return
         self._history[dedup_key] = now
 
-        content = UNMutableNotificationContent.alloc().init()
+        # Prune expired entries to prevent unbounded growth
+        expired = [k for k, v in self._history.items() if (now - v) >= COOLDOWN_SECONDS]
+        for k in expired:
+            del self._history[k]
+
+        content = self._UNMutableNotificationContent.alloc().init()
         content.setTitle_(APP_NAME)
         content.setSubtitle_(title)
         content.setBody_(message or '')
         if pid is not None:
             content.setUserInfo_({'pid': pid})
 
-        request = UNNotificationRequest.requestWithIdentifier_content_trigger_(
+        request = self._UNNotificationRequest.requestWithIdentifier_content_trigger_(
             str(uuid.uuid4()), content, None
         )
         self._center.addNotificationRequest_withCompletionHandler_(

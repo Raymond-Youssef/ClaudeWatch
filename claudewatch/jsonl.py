@@ -62,21 +62,6 @@ class JsonlParser:
                 return max(jsonl_files, key=lambda f: f.stat().st_mtime)
 
             session_first_ts = {}
-            with open(history_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    sid = obj.get('sessionId', '')
-                    ts = int(obj.get('timestamp', 0)) / 1000
-                    if sid and ts and sid not in session_first_ts:
-                        session_first_ts[sid] = ts
-
-            # Also track the latest timestamp per session for recency
             session_latest_ts = {}
             with open(history_path, 'r') as f:
                 for line in f:
@@ -90,6 +75,8 @@ class JsonlParser:
                     sid = obj.get('sessionId', '')
                     ts = int(obj.get('timestamp', 0)) / 1000
                     if sid and ts:
+                        if sid not in session_first_ts:
+                            session_first_ts[sid] = ts
                         session_latest_ts[sid] = max(session_latest_ts.get(sid, 0), ts)
 
             jsonl_by_uuid = {f.stem: f for f in jsonl_files}
@@ -229,7 +216,7 @@ class JsonlParser:
 
                 if role == 'assistant':
                     if isinstance(content, list) and content:
-                        block = content[0]
+                        block = content[-1]
                         if isinstance(block, dict):
                             block_type = block.get('type')
                             if block_type == 'tool_use':

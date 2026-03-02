@@ -79,7 +79,7 @@ class JsonlFileState:
 
         if role == 'assistant':
             if isinstance(content, list) and content:
-                block = content[0]
+                block = content[-1]
                 if isinstance(block, dict):
                     block_type = block.get('type')
                     if block_type == 'tool_use':
@@ -196,6 +196,16 @@ class JsonlWatcher:
         with self._lock:
             return self._file_states.get(str(path))
 
+    def seed_sessions(self, sessions):
+        """Watch JSONL files for all existing active sessions.
+
+        Takes a list of session dicts, each with a 'jsonl' key.
+        """
+        for session in sessions:
+            jsonl_path = session.get('jsonl', '')
+            if jsonl_path:
+                self.watch_file(jsonl_path)
+
     def _on_file_modified(self, src_path):
         """Called by _DirectoryHandler when a .jsonl file is modified."""
         path_str = str(src_path)
@@ -204,14 +214,14 @@ class JsonlWatcher:
                 return
             self._pending_modified[path_str] = time.monotonic()
 
-        # Schedule debounced processing
-        if self._debounce_timer:
-            self._debounce_timer.cancel()
-        self._debounce_timer = threading.Timer(
-            self.DEBOUNCE_SECONDS, self._process_pending
-        )
-        self._debounce_timer.daemon = True
-        self._debounce_timer.start()
+            # Schedule debounced processing (inside lock to prevent race)
+            if self._debounce_timer:
+                self._debounce_timer.cancel()
+            self._debounce_timer = threading.Timer(
+                self.DEBOUNCE_SECONDS, self._process_pending
+            )
+            self._debounce_timer.daemon = True
+            self._debounce_timer.start()
 
     def _process_pending(self):
         """Process all pending file modifications after debounce."""
