@@ -201,12 +201,14 @@ class ClaudeWatch(rumps.App):
             changed = True
 
             if new_state in ('waiting_tool', 'waiting_input') and prev_state == 'active':
-                title = session.get('title', 'Unknown')[:100]
-                pid = session.get('pid')
-                if new_state == 'waiting_tool':
-                    self.notifier.notify(f"Needs approval in {session['ide']}", title, pid)
-                else:
-                    self.notifier.notify(f"Waiting for input in {session['ide']}", title, pid)
+                if not self.focus_mgr.is_session_focused(session):
+                    title = session.get('title', 'Unknown')[:100]
+                    pid = session.get('pid')
+                    body = (file_state.latest_response or '').replace('\n', ' ')[:150]
+                    if new_state == 'waiting_tool':
+                        self.notifier.notify(f"Needs approval in {session['ide']}", title, pid, body)
+                    else:
+                        self.notifier.notify(f"Waiting for input in {session['ide']}", title, pid, body)
 
         # Update latest response
         if file_state.latest_response:

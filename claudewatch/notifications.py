@@ -128,7 +128,7 @@ class Notifier:
         except Exception:
             pass
 
-    def notify(self, title, message, pid=None):
+    def notify(self, title, message, pid=None, body=None):
         """Send a notification via UNUserNotificationCenter.
 
         Duplicate notifications (same title + message) are suppressed
@@ -149,7 +149,7 @@ class Notifier:
         content = self._UNMutableNotificationContent.alloc().init()
         content.setTitle_(APP_NAME)
         content.setSubtitle_(title)
-        content.setBody_(message or '')
+        content.setBody_(body or message or '')
         if pid is not None:
             content.setUserInfo_({'pid': pid})
 

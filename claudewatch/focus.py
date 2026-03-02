@@ -3,6 +3,8 @@
 import re
 import subprocess
 
+from AppKit import NSWorkspace
+
 _SAFE_TTY_RE = re.compile(r'[^a-zA-Z0-9/]')
 
 
@@ -22,6 +24,18 @@ class FocusManager:
         'Alacritty': 'Alacritty',
         'Kitty': 'kitty',
     }
+
+    def is_session_focused(self, session):
+        """Check if the session's IDE/terminal is the frontmost app."""
+        ide = session.get('ide', '')
+        app_name = self.APP_NAME_MAP.get(ide, ide)
+        if not app_name:
+            return False
+        try:
+            front = NSWorkspace.sharedWorkspace().frontmostApplication()
+            return front and front.localizedName() == app_name
+        except Exception:
+            return False
 
     def focus_session(self, session):
         """Bring the IDE/terminal window for a session to the foreground."""

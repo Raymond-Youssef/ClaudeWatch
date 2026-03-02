@@ -62,8 +62,9 @@ class JsonlFileState:
     def _process_entry(self, obj):
         """Process a single JSONL entry, updating cached fields."""
         entry_type = obj.get('type')
-        if entry_type == 'progress':
-            self.state = 'active'
+
+        # Skip non-message entries — they don't reflect conversational state
+        if entry_type not in ('user', 'assistant'):
             return
 
         msg = obj.get('message', {})

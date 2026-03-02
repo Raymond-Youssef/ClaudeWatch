@@ -204,8 +204,10 @@ class JsonlParser:
 
                 entry_type = obj.get('type')
 
-                if entry_type == 'progress':
-                    return 'active'
+                # Skip non-message entries (progress, system, file-history-snapshot)
+                # — they don't reflect conversational state
+                if entry_type not in ('user', 'assistant'):
+                    continue
 
                 msg = obj.get('message', {})
                 role = msg.get('role')
