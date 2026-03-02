@@ -95,8 +95,12 @@ class ClaudeWatch(rumps.App):
             jsonl_path = JsonlParser.find_session_jsonl(cwd, meta['create_time']) if cwd else None
             convo_id = SessionManager.convo_id_for(jsonl_path, pid)
 
-            if convo_id in self.session_mgr.sessions:
+            existing = self.session_mgr.sessions.get(convo_id)
+            if existing and existing['status'] == 'running':
                 continue
+            # Re-register if previous session with same convo_id completed
+            if existing:
+                del self.session_mgr.sessions[convo_id]
 
             self._handle_new_session(pid, meta, jsonl_path, convo_id)
 
