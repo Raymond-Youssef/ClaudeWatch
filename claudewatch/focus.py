@@ -28,15 +28,36 @@ class FocusManager:
         'Kitty': 'kitty',
     }
 
+    # Bundle IDs for focus detection (localizedName can differ from app name)
+    BUNDLE_ID_MAP = {
+        'VS Code': 'com.microsoft.VSCode',
+        'RubyMine': 'com.jetbrains.rubymine',
+        'PyCharm': 'com.jetbrains.pycharm',
+        'IntelliJ': 'com.jetbrains.intellij',
+        'WebStorm': 'com.jetbrains.WebStorm',
+        'GoLand': 'com.jetbrains.goland',
+        'Cursor': 'com.todesktop.230313mzl4w4u92',
+        'Claude': 'com.anthropic.claudefordesktop',
+        'iTerm': 'com.googlecode.iterm2',
+        'Terminal': 'com.apple.Terminal',
+        'Warp': 'dev.warp.Warp-Stable',
+        'Alacritty': 'org.alacritty',
+        'Kitty': 'net.kovidgoyal.kitty',
+    }
+
     def is_session_focused(self, session):
         """Check if the session's IDE/terminal is the frontmost app."""
         ide = session.get('ide', '')
-        app_name = self.APP_NAME_MAP.get(ide, ide)
-        if not app_name:
-            return False
+        bundle_id = self.BUNDLE_ID_MAP.get(ide)
         try:
             front = NSWorkspace.sharedWorkspace().frontmostApplication()
-            return front and front.localizedName() == app_name
+            if not front:
+                return False
+            if bundle_id:
+                return front.bundleIdentifier() == bundle_id
+            # Fallback to name comparison for unknown IDEs
+            app_name = self.APP_NAME_MAP.get(ide, ide)
+            return app_name and front.localizedName() == app_name
         except Exception:
             return False
 
