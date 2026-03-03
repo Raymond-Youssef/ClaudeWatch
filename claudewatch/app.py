@@ -122,7 +122,7 @@ class ClaudeWatch(rumps.App):
                 )
                 items_to_add.append((title_key, title_item))
 
-                msg_key = f"  {item['msg_text']} #{title_key}"
+                msg_key = f"  {item['msg_text']}"
                 msg_item = rumps.MenuItem(msg_key, callback=None)
                 items_to_add.append((msg_key, msg_item))
         else:
