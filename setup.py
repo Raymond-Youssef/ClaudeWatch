@@ -1,5 +1,7 @@
 from setuptools import setup
 
+from claudewatch import __version__
+
 APP = ['claudewatch/__main__.py']
 DATA_FILES = [('', ['icon.png'])]
 OPTIONS = {
@@ -9,8 +11,8 @@ OPTIONS = {
         'CFBundleName': 'ClaudeWatch',
         'CFBundleDisplayName': 'ClaudeWatch',
         'CFBundleIdentifier': 'com.claudewatch.app',
-        'CFBundleVersion': '1.0.0',
-        'CFBundleShortVersionString': '1.0.0',
+        'CFBundleVersion': __version__,
+        'CFBundleShortVersionString': __version__,
         'LSUIElement': True,  # Menu bar app, no dock icon
         'NSUserNotificationAlertStyle': 'alert',
     },
