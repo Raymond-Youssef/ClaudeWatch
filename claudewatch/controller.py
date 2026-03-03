@@ -1,6 +1,7 @@
 """SessionController — business logic extracted from ClaudeWatch app."""
 
 import time
+from pathlib import Path
 
 from claudewatch.jsonl import JsonlParser
 from claudewatch.session import SessionManager
@@ -76,20 +77,50 @@ class SessionController:
         # Check for JSONL that was missing at session creation and retry
         claimed_jsonl = self.session_mgr.get_claimed_jsonl_paths()
         for convo_id, session in list(self.session_mgr.sessions.items()):
-            if session['status'] != 'running' or session.get('jsonl'):
+            if session['status'] != 'running':
                 continue
             cwd = session.get('cwd', '')
             if not cwd:
                 continue
-            jsonl_path = JsonlParser.find_session_jsonl(cwd, session['started_at'], exclude_paths=claimed_jsonl)
-            if jsonl_path:
-                session['jsonl'] = str(jsonl_path)
-                file_state = self.jsonl_watcher.watch_file(jsonl_path)
-                if file_state and file_state.title:
-                    session['title'] = file_state.title
-                new_id = SessionManager.convo_id_for(jsonl_path, session['pid'])
-                self.session_mgr.rekey(convo_id, new_id)
-                changed = True
+
+            if not session.get('jsonl'):
+                # No JSONL yet — try to find one
+                jsonl_path = JsonlParser.find_session_jsonl(cwd, session['started_at'], exclude_paths=claimed_jsonl)
+                if jsonl_path:
+                    session['jsonl'] = str(jsonl_path)
+                    file_state = self.jsonl_watcher.watch_file(jsonl_path)
+                    if file_state and file_state.title:
+                        session['title'] = file_state.title
+                    new_id = SessionManager.convo_id_for(jsonl_path, session['pid'])
+                    self.session_mgr.rekey(convo_id, new_id)
+                    changed = True
+            else:
+                # Has JSONL — check if the conversation restarted (e.g. /exit then new chat)
+                # by looking for a newer JSONL file in the same project directory
+                current_jsonl = Path(session['jsonl'])
+                try:
+                    current_mtime = current_jsonl.stat().st_mtime
+                except OSError:
+                    continue
+                project_dir = current_jsonl.parent
+                newer = [
+                    f for f in project_dir.glob('*.jsonl')
+                    if f.stat().st_mtime > current_mtime and str(f) not in claimed_jsonl
+                ]
+                if newer:
+                    best = max(newer, key=lambda f: f.stat().st_mtime)
+                    if JsonlParser._has_conversation(best):
+                        # Switch to the newer JSONL
+                        self.jsonl_watcher.unwatch_file(session['jsonl'])
+                        session['jsonl'] = str(best)
+                        file_state = self.jsonl_watcher.watch_file(best)
+                        if file_state and file_state.title:
+                            session['title'] = file_state.title
+                        session['last_state'] = file_state.state if file_state else 'active'
+                        new_id = SessionManager.convo_id_for(best, session['pid'])
+                        self.session_mgr.rekey(convo_id, new_id)
+                        claimed_jsonl.add(str(best))
+                        changed = True
 
         return changed
 
