@@ -27,6 +27,12 @@ def make_controller():
     return ctrl
 
 
+def _flush_notify_timers(ctrl):
+    """Run and wait for all pending notification timers."""
+    for timer in list(ctrl._notify_timers.values()):
+        timer.join(timeout=2)
+
+
 def _proc(pid='12345', create_time=1000.0, cwd='/tmp/project',
           ide='VS Code', tty='/dev/ttys001'):
     """Build a process-info dict as returned by monitor.scan_processes."""
@@ -634,8 +640,10 @@ class TestHandleJsonlChange:
 
     def test_sends_notification_on_waiting_tool_from_active(self):
         ctrl = make_controller()
+        ctrl.NOTIFY_DELAY = 0
         session = _session(last_state='active', ide='VS Code', title='Build task')
         ctrl.session_mgr.find_by_jsonl.return_value = ('convo-1', session)
+        ctrl.session_mgr.sessions = {'convo-1': session}
         ctrl.focus_mgr.is_session_focused.return_value = False
 
         file_state = MagicMock()
@@ -644,6 +652,7 @@ class TestHandleJsonlChange:
         file_state.latest_response = 'I need to run a command'
 
         result = ctrl.handle_jsonl_change('/tmp/test.jsonl', file_state)
+        _flush_notify_timers(ctrl)
 
         assert result is True
         ctrl.notifier.notify.assert_called_once()
@@ -653,8 +662,10 @@ class TestHandleJsonlChange:
 
     def test_sends_notification_on_waiting_input_from_active(self):
         ctrl = make_controller()
+        ctrl.NOTIFY_DELAY = 0
         session = _session(last_state='active', ide='Cursor', title='Debug issue')
         ctrl.session_mgr.find_by_jsonl.return_value = ('convo-1', session)
+        ctrl.session_mgr.sessions = {'convo-1': session}
         ctrl.focus_mgr.is_session_focused.return_value = False
 
         file_state = MagicMock()
@@ -663,6 +674,7 @@ class TestHandleJsonlChange:
         file_state.latest_response = 'What should I do next?'
 
         result = ctrl.handle_jsonl_change('/tmp/test.jsonl', file_state)
+        _flush_notify_timers(ctrl)
 
         assert result is True
         ctrl.notifier.notify.assert_called_once()
@@ -672,8 +684,10 @@ class TestHandleJsonlChange:
 
     def test_suppresses_notification_when_focused(self):
         ctrl = make_controller()
+        ctrl.NOTIFY_DELAY = 0
         session = _session(last_state='active', ide='VS Code')
         ctrl.session_mgr.find_by_jsonl.return_value = ('convo-1', session)
+        ctrl.session_mgr.sessions = {'convo-1': session}
         ctrl.focus_mgr.is_session_focused.return_value = True
 
         file_state = MagicMock()
@@ -682,6 +696,7 @@ class TestHandleJsonlChange:
         file_state.latest_response = 'Response'
 
         ctrl.handle_jsonl_change('/tmp/test.jsonl', file_state)
+        _flush_notify_timers(ctrl)
 
         ctrl.notifier.notify.assert_not_called()
 
@@ -713,6 +728,34 @@ class TestHandleJsonlChange:
         file_state.latest_response = None
 
         ctrl.handle_jsonl_change('/tmp/test.jsonl', file_state)
+
+        ctrl.notifier.notify.assert_not_called()
+
+    def test_notification_cancelled_when_state_returns_to_active(self):
+        """If state goes active→waiting→active before the timer fires,
+        the notification should be cancelled."""
+        ctrl = make_controller()
+        ctrl.NOTIFY_DELAY = 10  # long delay so timer won't fire naturally
+        session = _session(last_state='active', ide='VS Code', title='Task')
+        ctrl.session_mgr.find_by_jsonl.return_value = ('convo-1', session)
+        ctrl.session_mgr.sessions = {'convo-1': session}
+        ctrl.focus_mgr.is_session_focused.return_value = False
+
+        # Transition to waiting_tool — schedules a notification
+        fs1 = MagicMock()
+        fs1.title = 'Task'
+        fs1.state = 'waiting_tool'
+        fs1.latest_response = 'Need approval'
+        ctrl.handle_jsonl_change('/tmp/test.jsonl', fs1)
+        assert 'convo-1' in ctrl._notify_timers
+
+        # State returns to active — should cancel the timer
+        fs2 = MagicMock()
+        fs2.title = 'Task'
+        fs2.state = 'active'
+        fs2.latest_response = None
+        ctrl.handle_jsonl_change('/tmp/test.jsonl', fs2)
+        assert 'convo-1' not in ctrl._notify_timers
 
         ctrl.notifier.notify.assert_not_called()
 
@@ -780,8 +823,10 @@ class TestHandleJsonlChange:
     def test_notification_body_from_latest_response(self):
         """Notification body is derived from file_state.latest_response."""
         ctrl = make_controller()
+        ctrl.NOTIFY_DELAY = 0
         session = _session(last_state='active', ide='Terminal', pid='999')
         ctrl.session_mgr.find_by_jsonl.return_value = ('convo-1', session)
+        ctrl.session_mgr.sessions = {'convo-1': session}
         ctrl.focus_mgr.is_session_focused.return_value = False
 
         file_state = MagicMock()
@@ -790,6 +835,7 @@ class TestHandleJsonlChange:
         file_state.latest_response = 'Line1\nLine2\nLine3'
 
         ctrl.handle_jsonl_change('/tmp/test.jsonl', file_state)
+        _flush_notify_timers(ctrl)
 
         notify_call = ctrl.notifier.notify.call_args
         body = notify_call[0][3]  # 4th positional arg
@@ -798,8 +844,10 @@ class TestHandleJsonlChange:
 
     def test_notification_body_truncated_to_150_chars(self):
         ctrl = make_controller()
+        ctrl.NOTIFY_DELAY = 0
         session = _session(last_state='active', ide='VS Code')
         ctrl.session_mgr.find_by_jsonl.return_value = ('convo-1', session)
+        ctrl.session_mgr.sessions = {'convo-1': session}
         ctrl.focus_mgr.is_session_focused.return_value = False
 
         file_state = MagicMock()
@@ -808,6 +856,7 @@ class TestHandleJsonlChange:
         file_state.latest_response = 'x' * 300
 
         ctrl.handle_jsonl_change('/tmp/test.jsonl', file_state)
+        _flush_notify_timers(ctrl)
 
         notify_call = ctrl.notifier.notify.call_args
         body = notify_call[0][3]

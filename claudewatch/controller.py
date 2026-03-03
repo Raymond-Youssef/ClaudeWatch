@@ -1,5 +1,6 @@
 """SessionController — business logic extracted from ClaudeWatch app."""
 
+import threading
 import time
 from pathlib import Path
 
@@ -21,6 +22,7 @@ class SessionController:
         self.pid_watcher = pid_watcher
         self.jsonl_watcher = jsonl_watcher
         self._paused = False
+        self._notify_timers = {}  # convo_id -> threading.Timer
 
     # ── Discovery (timer-driven) ──────────────────────────────────────
 
@@ -193,15 +195,14 @@ class SessionController:
             session['last_state'] = new_state
             changed = True
 
-            if new_state in ('waiting_tool', 'waiting_input') and prev_state == 'active':
-                if not self.focus_mgr.is_session_focused(session):
-                    title = session.get('title', 'Unknown')[:100]
-                    pid = session.get('pid')
-                    body = (file_state.latest_response or '').replace('\n', ' ')[:150]
-                    if new_state == 'waiting_tool':
-                        self.notifier.notify(f"Needs approval in {session['ide']}", title, pid, body)
-                    else:
-                        self.notifier.notify(f"Waiting for input in {session['ide']}", title, pid, body)
+            if new_state == 'active':
+                # Claude resumed work — cancel any pending notification
+                self._cancel_notify_timer(cid)
+            elif new_state in ('waiting_tool', 'waiting_input') and prev_state == 'active':
+                # Schedule notification after a short delay so intermediate
+                # states (e.g. text block followed by tool_use) don't cause
+                # a wrong notification.
+                self._schedule_notification(cid, session, file_state, new_state)
 
         if file_state.latest_response:
             session['latest_response'] = file_state.latest_response
@@ -211,6 +212,46 @@ class SessionController:
             self.session_mgr.save_sessions()
 
         return changed
+
+    # ── Notification debounce ────────────────────────────────────────
+
+    NOTIFY_DELAY = 1.5  # seconds
+
+    def _schedule_notification(self, cid, session, file_state, state):
+        """Schedule a notification after NOTIFY_DELAY seconds.
+
+        If the state reverts to 'active' before the timer fires, the
+        notification is cancelled — avoiding false alerts from intermediate
+        JSONL states (e.g. a text block written just before a tool_use block).
+        """
+        self._cancel_notify_timer(cid)
+
+        def _fire():
+            self._notify_timers.pop(cid, None)
+            # Re-check: session may have ended or state may have changed
+            current = self.session_mgr.sessions.get(cid)
+            if not current or current.get('last_state') != state:
+                return
+            if self.focus_mgr.is_session_focused(current):
+                return
+            title = current.get('title', 'Unknown')[:100]
+            pid = current.get('pid')
+            body = (file_state.latest_response or '').replace('\n', ' ')[:150]
+            if state == 'waiting_tool':
+                self.notifier.notify(f"Needs approval in {current['ide']}", title, pid, body)
+            else:
+                self.notifier.notify(f"Waiting for input in {current['ide']}", title, pid, body)
+
+        timer = threading.Timer(self.NOTIFY_DELAY, _fire)
+        timer.daemon = True
+        timer.start()
+        self._notify_timers[cid] = timer
+
+    def _cancel_notify_timer(self, cid):
+        """Cancel a pending notification timer for a session."""
+        timer = self._notify_timers.pop(cid, None)
+        if timer:
+            timer.cancel()
 
     # ── Notification click ────────────────────────────────────────────
 
