@@ -45,6 +45,12 @@ class FocusManager:
         'Kitty': 'net.kovidgoyal.kitty',
     }
 
+    # URI schemes for workspace-level window focus (no permissions needed)
+    _IDE_URI_SCHEMES = {
+        'VS Code': 'vscode',
+        'Cursor': 'cursor',
+    }
+
     def is_session_focused(self, session):
         """Check if the session's IDE/terminal is the frontmost app."""
         ide = session.get('ide', '')
@@ -93,6 +99,7 @@ class FocusManager:
         """Bring the IDE/terminal window for a session to the foreground."""
         ide = session.get('ide', '')
         tty = _SAFE_TTY_RE.sub('', session.get('tty') or '')
+        cwd = session.get('cwd', '')
 
         if ide == 'Terminal' and tty:
             if self._focus_terminal(tty):
@@ -102,9 +109,33 @@ class FocusManager:
             if self._focus_iterm(tty):
                 return
 
+        if ide in self._IDE_URI_SCHEMES and cwd:
+            if self._focus_ide_via_uri(ide, cwd):
+                return
+
         app_name = self.APP_NAME_MAP.get(ide, ide)
         if app_name:
             self._focus_app(app_name)
+
+    def _focus_ide_via_uri(self, ide, cwd):
+        """Focus a VS Code/Cursor workspace window using its URI scheme.
+
+        Opens vscode://file/<path> or cursor://file/<path> which brings
+        the existing window for that folder to front without opening a new one.
+        """
+        scheme = self._IDE_URI_SCHEMES.get(ide)
+        if not scheme:
+            return False
+        try:
+            uri = f'{scheme}://file{cwd}'
+            subprocess.Popen(
+                ['open', uri],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception:
+            return False
 
     def _focus_terminal(self, tty):
         """Focus exact Terminal.app tab by TTY."""

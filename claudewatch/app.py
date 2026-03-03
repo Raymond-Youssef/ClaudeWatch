@@ -85,9 +85,16 @@ class ClaudeWatch(rumps.App):
         for pid, meta in active_procs.items():
             cid, session = self.session_mgr.find_by_pid(pid, create_time=meta['create_time'])
             if cid is not None:
+                changed = False
                 # Update IDE if detection improved (e.g. new pattern added)
                 if meta['ide'] != 'Terminal' and session.get('ide') == 'Terminal':
                     session['ide'] = meta['ide']
+                    changed = True
+                # Update TTY if it wasn't available at registration
+                if not session.get('tty') and meta.get('tty'):
+                    session['tty'] = meta['tty']
+                    changed = True
+                if changed:
                     self.session_mgr.save_sessions()
                 continue
 
@@ -97,9 +104,15 @@ class ClaudeWatch(rumps.App):
 
             existing = self.session_mgr.sessions.get(convo_id)
             if existing and existing['status'] == 'running':
-                continue
+                # Different PID with same convo_id (same CWD, same JSONL) — use PID-based key
+                if str(existing.get('pid')) != str(pid):
+                    convo_id = f"pid-{pid}"
+                else:
+                    continue
+
             # Re-register if previous session with same convo_id completed
-            if existing:
+            old = self.session_mgr.sessions.get(convo_id)
+            if old and old['status'] != 'running':
                 del self.session_mgr.sessions[convo_id]
 
             self._handle_new_session(pid, meta, jsonl_path, convo_id)
