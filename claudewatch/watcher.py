@@ -131,9 +131,9 @@ class JsonlWatcher:
 
     DEBOUNCE_SECONDS = 0.3
 
-    def __init__(self, on_change_callback=None):
+    def __init__(self, on_change_callback=None, observer=None):
         self._on_change = on_change_callback
-        self._observer = Observer()
+        self._observer = observer or Observer()
         self._lock = threading.Lock()
         self._file_states = {}          # path_str -> JsonlFileState
         self._watched_dirs = {}         # dir_str -> watch handle

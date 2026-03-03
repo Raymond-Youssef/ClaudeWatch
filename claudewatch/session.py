@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 class SessionManager:
-    def __init__(self):
-        self.data_dir = Path.home() / '.claudewatch'
+    def __init__(self, data_dir=None):
+        self.data_dir = Path(data_dir) if data_dir else Path.home() / '.claudewatch'
         self.data_dir.mkdir(exist_ok=True)
         self.sessions_file = self.data_dir / 'sessions.json'
         self.sessions = self.load_sessions()
@@ -125,6 +125,13 @@ class SessionManager:
     def get_active(self):
         """Return list of sessions with status 'running'."""
         return [s for s in self.sessions.values() if s['status'] == 'running']
+
+    def get_claimed_jsonl_paths(self):
+        """Return a set of JSONL paths already claimed by running sessions."""
+        return {
+            s['jsonl'] for s in self.sessions.values()
+            if s['status'] == 'running' and s.get('jsonl')
+        }
 
     def get_completed_today(self):
         """Return sessions completed in the last 24 hours."""

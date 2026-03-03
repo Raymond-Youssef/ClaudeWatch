@@ -106,6 +106,34 @@ class NotificationDelegate(NSObject):
 COOLDOWN_SECONDS = 30
 
 
+class NotificationThrottle:
+    """Pure dedup/cooldown logic for notification rate-limiting."""
+
+    def __init__(self, cooldown_seconds=COOLDOWN_SECONDS):
+        self._cooldown = cooldown_seconds
+        self._history: dict[str, float] = {}
+
+    def should_send(self, dedup_key):
+        """Return True if this key hasn't been sent within the cooldown period."""
+        now = time.monotonic()
+        last_sent = self._history.get(dedup_key)
+        if last_sent is not None and (now - last_sent) < self._cooldown:
+            return False
+        return True
+
+    def record_sent(self, dedup_key):
+        """Record that a notification was sent for this key."""
+        self._history[dedup_key] = time.monotonic()
+        self.prune()
+
+    def prune(self):
+        """Remove expired entries to prevent unbounded growth."""
+        now = time.monotonic()
+        expired = [k for k, v in self._history.items() if (now - v) >= self._cooldown]
+        for k in expired:
+            del self._history[k]
+
+
 class Notifier:
     def __init__(self):
         _load_un_framework()
@@ -115,7 +143,7 @@ class Notifier:
         self._center = UNUserNotificationCenter.currentNotificationCenter()
         self._delegate = NotificationDelegate.alloc().init()
         self._center.setDelegate_(self._delegate)
-        self._history: dict[str, float] = {}
+        self._throttle = NotificationThrottle()
         self._request_authorization()
 
     def _request_authorization(self):
@@ -135,16 +163,9 @@ class Notifier:
         for COOLDOWN_SECONDS to avoid spamming the user.
         """
         dedup_key = f"{title}:{message}"
-        now = time.monotonic()
-        last_sent = self._history.get(dedup_key)
-        if last_sent is not None and (now - last_sent) < COOLDOWN_SECONDS:
+        if not self._throttle.should_send(dedup_key):
             return
-        self._history[dedup_key] = now
-
-        # Prune expired entries to prevent unbounded growth
-        expired = [k for k, v in self._history.items() if (now - v) >= COOLDOWN_SECONDS]
-        for k in expired:
-            del self._history[k]
+        self._throttle.record_sent(dedup_key)
 
         content = self._UNMutableNotificationContent.alloc().init()
         content.setTitle_(APP_NAME)

@@ -31,7 +31,7 @@ class JsonlParser:
     def _has_conversation(jsonl_path):
         """Check if a JSONL file contains at least one user or assistant message."""
         try:
-            with open(jsonl_path, 'r') as f:
+            with open(jsonl_path, 'r', encoding='utf-8', errors='replace') as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -45,13 +45,19 @@ class JsonlParser:
         return False
 
     @staticmethod
-    def find_session_jsonl(cwd, process_create_time):
-        """Find the JSONL file for a specific session by matching process creation time."""
+    def find_session_jsonl(cwd, process_create_time, exclude_paths=None):
+        """Find the JSONL file for a specific session by matching process creation time.
+
+        exclude_paths: optional set of path strings to skip (already claimed by other sessions).
+        """
         try:
             projects_base = JsonlParser.get_project_dir(cwd)
             if not projects_base.is_dir():
                 return None
-            jsonl_files = list(projects_base.glob('*.jsonl'))
+            jsonl_files = [
+                f for f in projects_base.glob('*.jsonl')
+                if not exclude_paths or str(f) not in exclude_paths
+            ]
             if not jsonl_files:
                 return None
             if len(jsonl_files) == 1:
@@ -63,7 +69,7 @@ class JsonlParser:
 
             session_first_ts = {}
             session_latest_ts = {}
-            with open(history_path, 'r') as f:
+            with open(history_path, 'r', encoding='utf-8', errors='replace') as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -123,7 +129,7 @@ class JsonlParser:
         try:
             if not jsonl_path:
                 return None
-            with open(jsonl_path, 'r') as f:
+            with open(jsonl_path, 'r', encoding='utf-8', errors='replace') as f:
                 for line in f:
                     line = line.strip()
                     if not line:
