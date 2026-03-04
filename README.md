@@ -2,6 +2,10 @@
 
 A lightweight macOS menu bar app that tracks all your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions across different IDEs and terminals.
 
+<p align="center">
+  <img src="screenshots/menu-bar.png" alt="ClaudeWatch menu bar dropdown" width="600">
+</p>
+
 ## Features
 
 - **System-wide tracking** -- Monitors all `claude` processes regardless of where they're launched
